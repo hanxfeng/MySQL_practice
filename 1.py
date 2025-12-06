@@ -107,5 +107,60 @@ def buy_course():
         cursor.close()
         conn.close()
 
+@app.route('/api/course_list',methods=['POST'])
+def course_list(page = 1,keyword = None):
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        if keyword != None:
+            cursor.execute(
+                'select id,title,price,student_count,cover_url from courses where title = %s',
+                (keyword)
+            )
+            all_list = cursor.fetchone()
+
+            return jsonify({
+                "id": all_list[0],
+                "title": all_list[1],
+                "price": all_list[2],
+                "student_count": [3],
+                "cover_url": all_list[4]
+            })
+
+        else:
+            cursor.execute(
+                'select id,title,price,student_count,cover_url from courses limit %s 10',
+                ((page - 1) * 10)
+            )
+            all_list = cursor.fetchall()
+            id = []
+            title = []
+            price = []
+            student_count = []
+            cover_url = []
+            for i in all_list:
+                id.append(i[0])
+                title.append(i[1])
+                price.append(i[2])
+                student_count.append(i[3])
+                cover_url.append(i[4])
+
+            return jsonify({
+                "id": id,
+                "title": title,
+                "price": price,
+                "student_count": student_count,
+                "cover_url": cover_url
+            })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": "购买失败：{}".format(str(e))}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
 if __name__ == '__main__':
     app.run(debug=True)
