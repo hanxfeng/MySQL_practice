@@ -9,19 +9,18 @@ db_config = {
 }
 
 
-def course_list(page=1, keyword=None):
+def course_list(course_id):
     conn = pymysql.connect(**db_config)
     cursor = conn.cursor()
 
     try:
-        if keyword == None:
-            cursor.execute(
-                'select id,title,price,student_count,cover_url from courses limit %s,10',
-                ((page - 1) * 10)
-            )
-            re = cursor.fetchall()
+        cursor.execute(
+            "select title from lessons where id = %s"
+            , course_id
+        )
+        re = cursor.fetchall()
 
-            return re
+        return re
     except:
         print("运行失败")
     finally:
@@ -29,4 +28,4 @@ def course_list(page=1, keyword=None):
         conn.close()
 
 
-print(course_list())
+print(list(course_list(1)))
