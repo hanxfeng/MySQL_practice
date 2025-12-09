@@ -9,8 +9,8 @@ db_config = {
 conn = pymysql.connect(**db_config)
 cursor = conn.cursor()
 cursor.execute(
-    "select price from courses where id = %s",
-    1
+    "select created_at from course_student where user_id = %s and course_id = %s",
+    (1, 1)
 )
 course_price = cursor.fetchone()
-print(float(course_price[0]))
+print(course_price)

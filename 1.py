@@ -136,7 +136,7 @@ def class_details():
     course_id = data.get("course_id")
 
     if not course_id:
-        return jsonify({"success": False, "message": "缺少 course_id"}), 400
+        return jsonify({"success": False, "message": "course_id 不能为空"}), 400
 
     conn = pymysql.connect(**db_config)
     cursor = conn.cursor()
@@ -211,6 +211,7 @@ def login_required(func):
 
     return wrapper
 
+
 # 购买课程
 @app.route("/api/buy_course", methods=["POST"])
 @login_required
@@ -220,7 +221,7 @@ def buy_course(user_id):
     course_id = data.get("course_id")
 
     if not course_id:
-        return jsonify({"success": False, "message": "course_id不能为空"}), 400
+        return jsonify({"success": False, "message": "course_id 不能为空"}), 400
 
     conn = pymysql.connect(**db_config)
     cursor = conn.cursor()
@@ -313,21 +314,297 @@ def buy_course(user_id):
         conn.close()
 
 
-@app.route("/api/progress/get",methods=["POST"])
+# 查询学习进度
+@app.route("/api/progress/get", methods=["POST"])
 @login_required
-def progress_get(user_id):
+def get_progress(user_id):
     data = request.json or {}
     course_id = data.get("course_id")
 
     if not course_id:
-        return jsonify({"success": False, "message": "course_id不能为空"})
+        return jsonify({"success": False, "message": "course_id 不能为空"}), 400
 
     conn = pymysql.connect(**db_config)
     cursor = conn.cursor()
 
-    #
+    try:
+        # 获取所有章节
+        cursor.execute(
+            "SELECT id, title FROM lessons WHERE course_id = %s ORDER BY sort_order ASC",
+            (course_id,)
+        )
+        lessons = cursor.fetchall()
+
+        if not lessons:
+            return jsonify({"success": False, "message": "该课程无章节"}), 404
+
+        total_lessons = len(lessons)
+        completed_count = 0
+        lesson_progress = []
+
+        for lesson_id, title in lessons:
+            cursor.execute(
+                "SELECT progress FROM learning_progress WHERE user_id=%s AND lesson_id=%s",
+                (user_id, lesson_id)
+            )
+            row = cursor.fetchone()
+            progress = row[0] if row else 0
+
+            if progress >= 100:
+                completed_count += 1
+
+            lesson_progress.append({
+                "lesson_id": lesson_id,
+                "title": title,
+                "progress": progress
+            })
+
+        overall_progress = round((completed_count / total_lessons) * 100, 2)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "overall_progress": overall_progress,
+                "lesson_progress": lesson_progress
+            }
+        })
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
+# 更新章节学习进度
+@app.route("/api/progress/update", methods=["POST"])
+@login_required
+def update_progress(user_id):
+    data = request.json or {}
+    lesson_id = data.get("lesson_id")
+    progress = data.get("progress")
+
+    if lesson_id is None or progress is None:
+        return jsonify({"success": False, "message": "缺少参数 lesson_id 或 progress"}), 400
+
+    progress = min(max(progress, 0), 100)  # 限制 0~100
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO learning_progress (user_id, lesson_id, progress)
+            VALUES (%s,%s,%s)
+            ON DUPLICATE KEY UPDATE progress=%s, updated_at=NOW()
+            """,
+            (user_id, lesson_id, progress)
+        )
+
+        conn.commit()
+        return jsonify({"success": True, "message": "进度已更新"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/add_comment", methods=["POST"])
+@login_required
+def add_comment(user_id):
+    data = request.json or {}
+    course_id = data.get("course_id")
+    rating = data.get("rating")
+    content = data.get("content")
+
+    if course_id is None or rating is None or content is None:
+        return jsonify({"success": False, "message": "缺少 course_id 或 rating 或 content 参数"}), 400
+
+    if rating < 1 or rating > 5:
+        return jsonify({"success": False, "message": "评分范围为1-5"}), 400
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT 1 FROM courses WHERE id=%s", (course_id,))
+        if cursor.fetchone() is None:
+            return jsonify({"success": False, "message": "课程不存在"}), 404
+
+        cursor.execute(
+            "select 1 from course_student where user_id = %s and course_id = %s",
+            (user_id, course_id)
+        )
+        created_at = cursor.fetchone()
+        if created_at is None:
+            return jsonify({"success": False, "message": "未购买该课程"}), 403
+
+        cursor.execute(
+            "insert into comments (user_id,course_id,rating,content) values(%s,%s,%s,%s)",
+            (user_id, course_id, rating, content)
+        )
+
+        conn.commit()
+
+        return jsonify({"success": True, "message": "评论添加成功"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/get_comments", methods=["POST"])
+@login_required
+def get_comments(user_id):
+    data = request.json or {}
+    course_id = data.get("course_id")
+    page = int(data.get("page", 1))
+    limit = 10
+    offset = (page-1) * limit
+
+    if course_id is None or page is None:
+        return jsonify({"success": False, "message": "缺少 course_id 或 page 参数"}), 400
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT 1 FROM courses WHERE id=%s", (course_id,))
+        if cursor.fetchone() is None:
+            return jsonify({"success": False, "message": "课程不存在"}), 404
+
+        cursor.execute(
+            """
+              SELECT c.rating,
+                     c.content,
+                     c.likes,
+                     c.created_at,
+                     u.username 
+              FROM comments AS c
+              JOIN users AS u ON c.user_id = u.id
+              WHERE c.course_id = %s
+              ORDER BY c.created_at DESC
+              LIMIT %s OFFSET %s
+              """,
+            (course_id, limit, offset)
+        )
+        results = cursor.fetchall()
+
+        data = [
+            {
+                "rating": row[0],
+                "content": row[1],
+                "likes": row[2],
+                "created_at": row[3],
+                "username": row[4]
+            }
+            for row in results
+        ]
+
+        return jsonify({"success": True, "data": data}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/favorite_course", methods=["POST"])
+@login_required
+def favorite_course(user_id):
+    data = request.json or {}
+    course_id = data.get("course_id")
+
+    if not course_id:
+        return jsonify({"success": False, "message": "缺少 course_id 参数"}), 400
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        # 判断是否已收藏
+        cursor.execute(
+            "SELECT id FROM favorites WHERE user_id=%s AND course_id=%s",
+            (user_id, course_id)
+        )
+        favorite = cursor.fetchone()
+
+        if favorite:
+            # 已收藏则取消
+            cursor.execute("DELETE FROM favorites WHERE id=%s", (favorite[0],))
+            conn.commit()
+            return jsonify({"success": True, "message": "已取消收藏"}), 200
+
+        else:
+            # 未收藏则添加
+            cursor.execute(
+                "INSERT INTO favorites (user_id, course_id) VALUES (%s, %s)",
+                (user_id, course_id)
+            )
+            conn.commit()
+            return jsonify({"success": True, "message": "收藏成功"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/get_favorites", methods=["POST"])
+@login_required
+def get_favorites(user_id):
+    data = request.json or {}
+    page = int(data.get("page", 1))
+    limit = 10
+    offset = (page - 1) * limit
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT c.id, c.title, c.price, c.cover_url, c.student_count
+            FROM favorites f
+            JOIN courses c ON f.course_id = c.id
+            WHERE f.user_id = %s
+            ORDER BY f.created_at DESC
+            LIMIT %s OFFSET %s;
+            """,
+            (user_id, limit, offset)
+        )
+        courses = cursor.fetchall()
+
+        data = [
+            {
+                "id": row[0],
+                "title": row[1],
+                "price": row[2],
+                "cover_url": row[3],
+                "student_count": row[4]
+            } for row in courses
+        ]
+
+        return jsonify({"success": True, "data": data}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
 if __name__ == '__main__':
