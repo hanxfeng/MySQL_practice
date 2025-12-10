@@ -4,8 +4,10 @@ import pymysql
 import jwt
 import bcrypt
 import datetime
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 db_config = {
     "host": "101.200.161.243",
@@ -88,7 +90,7 @@ def login():
 def course_list():
     data = request.json or {}
     page = data.get("page", 1)
-    keyword = data.get("keyword", None)
+    keyword = data.get("keyword", "")
 
     page = max(int(page), 1)
     page_size = 10
@@ -100,13 +102,12 @@ def course_list():
     try:
         if keyword != None:
             cursor.execute(
-                'select id,title,price,student_count,cover_url from courses where title like ORDER BY created_at DESC '
-                '%s limit %s 10',
+                'select id,title,price,student_count,cover_url from courses where title like %s ORDER BY created_at DESC limit %s, 10',
                 ("%" + keyword + "%", offset)
             )
         else:
             cursor.execute(
-                'select id,title,price,student_count,cover_url from courses ORDER BY created_at DESC limit %s 10',
+                'select id,title,price,student_count,cover_url from courses ORDER BY created_at DESC limit %s, 10',
                 ((page - 1) * 10)
             )
         all_list = cursor.fetchall()
@@ -413,7 +414,7 @@ def update_progress(user_id):
         cursor.close()
         conn.close()
 
-
+# 添加评论
 @app.route("/api/add_comment", methods=["POST"])
 @login_required
 def add_comment(user_id):
@@ -461,6 +462,7 @@ def add_comment(user_id):
         conn.close()
 
 
+# 查询评论
 @app.route("/api/get_comments", methods=["POST"])
 @login_required
 def get_comments(user_id):
@@ -519,6 +521,7 @@ def get_comments(user_id):
         conn.close()
 
 
+# 收藏接口
 @app.route("/api/favorite_course", methods=["POST"])
 @login_required
 def favorite_course(user_id):
@@ -562,6 +565,7 @@ def favorite_course(user_id):
         conn.close()
 
 
+# 查询收藏课程
 @app.route("/api/get_favorites", methods=["POST"])
 @login_required
 def get_favorites(user_id):
