@@ -9,8 +9,16 @@ db_config = {
 conn = pymysql.connect(**db_config)
 cursor = conn.cursor()
 cursor.execute(
-    "select created_at from course_student where user_id = %s and course_id = %s",
+    """
+    select l.id AS lesson_id,COALESCE(lp.progress, 0) AS progress
+    from lessons l
+    LEFT JOIN learning_progress lp 
+        ON lp.lesson_id = l.id AND lp.user_id = %s
+    WHERE l.course_id = %s
+    ORDER BY l.id ASC
+    """,
     (1, 1)
 )
-course_price = cursor.fetchone()
+
+course_price = cursor.fetchall()
 print(course_price)
