@@ -2,7 +2,6 @@ from flask import Flask, request, render_template, jsonify, Response
 from functools import wraps
 import pymysql
 import jwt
-import bcrypt
 import datetime
 from flask_cors import CORS
 
@@ -720,7 +719,7 @@ def like_comment(user_id):
         conn.close()
 
 
-# 点赞 or 取消点赞评论
+# 点赞 or 取消点赞课程
 @app.route("/api/like_course",methods=["POST"])
 @login_required
 def like_course(user_id):
@@ -799,6 +798,7 @@ def get_course_progress(user_id):
         row = cursor.fetchone()
         course_progress = row[0] if row else 0
 
+        # 查询课程进度
         cursor.execute(
             """
             select l.id AS lesson_id,l.title AS lesson_title,,COALESCE(lp.progress, 0) AS progress
@@ -975,6 +975,7 @@ def finish_lesson(user_id):
         cursor.close()
         conn.close()
 
+
 # 计算连续学习天数
 @app.route("/api/user/streak", methods=["GET"])
 @login_required
@@ -984,14 +985,19 @@ def user_streak(user_id):
 
     try:
         # 判断今天是否学习
-        # CURDATE()的作用是返回当前日期，DATE(start_at)的作用是返回start_at的日期，判断二者是否相等确认当天是否学习
+        today_start = datetime.datetime.combine(
+            datetime.date.today(),
+            datetime.time.min
+        )
+        tomorrow_start = today_start + datetime.timedelta(days=1)
         cursor.execute(
             """
             select count(*)
             from learning_history
             where user_id = %s
-            AND DATE(start_at) = CURDATE()
-            """
+            AND start_at >= %s and start_at < %s
+            """,
+            (user_id, today_start, tomorrow_start)
         )
 
         today_count = cursor.fetchone()[0]
@@ -1000,7 +1006,7 @@ def user_streak(user_id):
         # 获取所有学习过的天数
         cursor.execute(
             """
-            select learning_history DISTINCT DATE(start_at)
+            select DISTINCT DATE(start_at)
             from learning_history
             where user_id = %s
             order by DATE(start_at) DESC
@@ -1043,6 +1049,90 @@ def user_streak(user_id):
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 查询用户学习记录
+@app.route("/api/learning/history")
+@login_required
+def learning_history(user_id):
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+    try:
+        # 获取一大堆各种各样的数据，具体见返回的字典
+        cursor.execute(
+            """
+            select lh.id,lh.course_id,c.title,lh.lesson_id,l.title,lh.start_at,lh.finish_at,lh.duration_seconds
+            from learning_history lh
+            join courses c on lh.course_id = c.id
+            join lessons l on lh.lesson_id = l.id
+            where lh.user_id = %s
+            limit 30
+            ORDER BY lh.start_at DESC
+            """,
+            (user_id,)
+        )
+        result = cursor.fetchall()
+
+        if not result:
+            return jsonify({"success": True, "history": []})
+
+        history = []
+        for row in result:
+            history.append({
+                "history_id": row[0],
+                "course_id": row[1],
+                "course_title": row[2],
+                "lesson_id": row[3],
+                "lesson_title": row[4],
+                "start_at": row[5],
+                "finish_at": row[6],
+                "duration_seconds": row[7]
+            })
+
+        return jsonify({"success": True, "history": history})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 今日学习时长统计
+@app.route("/api/learning/today_total", methods=["GET"])
+@login_required
+def today_total(user_id):
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        today_start = datetime.datetime.combine(
+            datetime.date.today(),
+            datetime.time.min
+        )
+        tomorrow_start = today_start + datetime.timedelta(days=1)
+
+        # 加总当天的学习时间
+        cursor.execute(
+            """
+            select COALESCE(SUM(duration_seconds), 0) 
+            from learning_history 
+            where user_id = %s and start_at >= %s and start_at < %s
+            """,
+            (user_id, today_start, tomorrow_start)
+        )
+        total_seconds = cursor.fetchone()[0]
+
+        return jsonify({
+            "success": True,
+            "today_seconds": int(total_seconds)
+        })
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
     finally:
         cursor.close()
         conn.close()
