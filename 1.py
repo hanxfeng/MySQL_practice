@@ -89,6 +89,7 @@ def login():
 def course_list():
     data = request.json or {}
     page = data.get("page", 1)
+    # 输入keyword为通过课程名搜索该课程相关信息，不输入则为搜索所有课程
     keyword = data.get("keyword", "")
 
     page = max(int(page), 1)
@@ -1137,6 +1138,101 @@ def today_total(user_id):
         cursor.close()
         conn.close()
 
+
+@app.route('/api/exam/results',methods=["POST"])
+@login_required
+def exam_results(user_id):
+    data = request.json or {}
+    page = data.get("page") or 1
+    limit = data.get("limit")
+
+    if page is None or limit is None:
+        return jsonify({"success": False, "message": "缺少参数 page 或 limit"}), 400
+
+    limit = 10
+    offset = (page - 1) * limit
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            """
+            select er.exam_id,e.title,er.course_id,c.title,er.score,er.created_at
+            from exam_results er
+            join exams e on er.exam_id = e.id
+            join courses c on er.course_id = c.id
+            where user_id = %s
+            ORDER BY er.created_at DESC  
+            LIMIT %s OFFSET %s
+            """,
+            (user_id, limit, offset)
+        )
+        result = cursor.fetchall()
+
+        # results数组
+        results = []
+        scores = []
+        for row in result:
+            score = row[4]
+            scores.append(score)
+            if score >= 60:
+                status = "已通过"
+            else:
+                status = "未通过"
+            results.append({
+                "exam_id": row[0],
+                "exam_title": row[1],
+                "course_id": row[2],
+                "course_title": row[3],
+                "score": score,
+                "created_at": row[5],
+                "status": status
+            })
+
+        # pagination数组
+        cursor.execute(
+            "select count(exam_id) from exam_results where user_id = %s",
+            (user_id,)
+        )
+        from math import ceil
+        total = cursor.fetchone()[0]
+        total_pages = ceil(total/limit)
+
+        if page == total_pages:
+            has_next = False
+        else:
+            has_next = True
+
+        if page == 1:
+            has_prev = False
+        else:
+            has_prev = True
+        pagination = {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages,
+            "has_next": has_next,
+            "has_prev": has_prev
+        }
+
+        # summary数组
+        summary = {
+            "total_exams": len(scores),
+            "avg_score": sum(scores) / len(scores),
+            "highest_score": max(scores),
+            "lowest_score": min(scores)
+        }
+
+        data = {"results": results, "pagination": pagination, "summary": summary}
+        return jsonify({"success": True, "data": data}), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 if __name__ == '__main__':
     app.run(debug=True)

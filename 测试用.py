@@ -9,16 +9,9 @@ db_config = {
 conn = pymysql.connect(**db_config)
 cursor = conn.cursor()
 cursor.execute(
-    """
-    select lh.id,lh.course_id,c.title,lh.lesson_id,l.title,lh.start_at,lh.finish_at,lh.duration_seconds
-    from learning_history lh
-    join courses c on lh.course_id = c.id
-    join lessons l on lh.lesson_id = l.id
-    where lh.user_id = %s
-    limit 30
-    """,
-    (1,)
+    "select count(exam_id) from exam_results where user_id = %s",
+    (0,)
 )
 
-course_price = cursor.fetchall()
+course_price = cursor.fetchone()
 print(course_price)
