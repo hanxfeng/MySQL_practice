@@ -88,42 +88,246 @@ def login():
 @app.route('/api/course_list', methods=['POST'])
 def course_list():
     data = request.json or {}
-    page = data.get("page", 1)
-    # 输入keyword为通过课程名搜索该课程相关信息，不输入则为搜索所有课程
-    keyword = data.get("keyword", "")
 
-    page = max(int(page), 1)
-    page_size = 10
-    offset = (page - 1) * page_size
+    # 获取并处理参数
+    page = int(data.get("page", 1))
+    limit = int(data.get("limit", 10))
+    keyword = data.get("keyword", "").strip()
+    teacher_id = data.get("teacher_id")
+    min_price = data.get("min_price")
+    max_price = data.get("max_price")
+    free_only = data.get("free_only", False)  # 是否为仅免费课程
+    sort_by = data.get("sort_by", "created_at")  # 排序用的字段 ： created_at, price, student_count, likes
+    sort_order = data.get("sort_order", "desc")  # asc, desc 排序方式
+
+    # 参数验证和标准化
+    page = max(page, 1)
+    limit = min(max(limit, 1), 50)  # 限制每页最多50条
+    offset = (page - 1) * limit
+
+    # 验证排序参数
+    valid_sort_fields = ["created_at", "price", "student_count", "likes", "id"]
+    if sort_by not in valid_sort_fields:
+        return jsonify({"success": False, "message": "排序参数错误"}), 400
+
+    if sort_order not in ["asc", "desc"]:
+        sort_order = "desc"
+
+    # 处理参数冲突
+    if free_only is not None and (min_price is not None or max_price is not None):
+        return jsonify({"success": False, "message": "free_only 参数与 min_price 和 max_price 参数冲突"})
 
     conn = pymysql.connect(**db_config)
     cursor = conn.cursor()
 
     try:
-        if keyword != None:
-            cursor.execute(
-                'select id,title,price,student_count,cover_url from courses where title like %s ORDER BY created_at DESC limit %s, 10',
-                ("%" + keyword + "%", offset)
-            )
-        else:
-            cursor.execute(
-                'select id,title,price,student_count,cover_url from courses ORDER BY created_at DESC limit %s, 10',
-                ((page - 1) * 10)
-            )
-        all_list = cursor.fetchall()
-        result = []
-        for row in all_list:
-            result.append({
+        # 根据参数传入情况动态构建 WHERE 条件
+        conditions = []
+        params = []
+
+        # 关键词搜索（标题或描述）
+        if keyword:
+            conditions.append("(c.title LIKE %s OR c.description LIKE %s)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])  # .extend用于将一个可迭代对象的所有元素挨个添加到列表末尾
+
+        # 按老师筛选
+        if teacher_id is not None:
+            conditions.append("c.teacher_id = %s")
+            params.append(teacher_id)
+
+        # 价格范围筛选
+        if min_price is not None:
+            conditions.append("c.price >= %s")
+            params.append(float(min_price))
+
+        if max_price is not None:
+            conditions.append("c.price <= %s")
+            params.append(float(max_price))
+
+        # 仅免费课程
+        if free_only:
+            conditions.append("c.price = 0")
+
+        # 构建完整的 WHERE 子句
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # 构建排序子句
+        order_clause = f"ORDER BY c.{sort_by} {sort_order.upper()}"
+
+        # 构建查询语句
+        base_query = """
+                   SELECT 
+                       c.id,
+                       c.title,
+                       c.description,
+                       c.cover_url,
+                       c.price,
+                       c.teacher_id,
+                       c.student_count,
+                       c.likes,
+                       c.created_at,
+                       u.username as teacher_name
+                   FROM courses c
+                   LEFT JOIN users u ON c.teacher_id = u.id
+               """
+
+        # 查询数据
+        cursor.execute(f"""
+            {base_query}
+            {where_clause}
+            {order_clause}
+            LIMIT %s OFFSET %s
+        """, params + [limit, offset])
+
+        courses_data = cursor.fetchall()
+
+        # 查询总数用于分页
+        cursor.execute(f"""
+                   SELECT COUNT(*) 
+                   FROM courses c
+                   {where_clause}
+               """, params)
+
+        total = cursor.fetchone()[0]
+
+        # 查询价格范围（用于返回筛选条件）
+        cursor.execute("""
+            SELECT 
+                COALESCE(MIN(price), 0),
+                COALESCE(MAX(price), 0)
+            FROM courses
+        """)
+        price_min, price_max = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT 
+                COALESCE(MIN(student_count), 0),
+                COALESCE(MAX(student_count), 0)
+            FROM courses
+        """)
+        student_min, student_max = cursor.fetchone()
+
+        # 处理返回数据
+        courses = []
+        for row in courses_data:
+            course = {
                 "id": row[0],
                 "title": row[1],
-                "price": float(row[2]),
-                "student_count": row[3],
-                "cover_url": row[4]
-            })
+                "description": row[2],
+                "cover_url": row[3],
+                "price": float(row[4]),
+                "teacher_id": row[5],
+                "student_count": row[6],
+                "likes": row[7],
+                "created_at": row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else None,
+                "teacher_name": row[9]
+            }
+            courses.append(course)
 
-        return jsonify({"success": True, "data": result})
+        # 计算分页信息
+        total_pages = (total + limit - 1) // limit  # 向上取整
+
+        pagination = {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        }
+
+        # 返回的筛选条件信息
+        filters = {
+            "price_range": {
+                "min": float(price_min),
+                "max": float(price_max)
+            },
+            "student_count_range": {
+                "min": student_min,
+                "max": student_max
+            }
+        }
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "courses": courses,
+                "pagination": pagination,
+                "filters": filters
+            }
+        }), 200
+
     except Exception as e:
         conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+# 获取热门课程
+@app.route('/api/course/popular', methods=['POST'])
+def popular_courses():
+    data = request.json or {}
+    limit = min(int(data.get("limit", 10)), 50)  # 限制最多50条
+    sort_by = data.get("sort_by", "student_count")  # student_count, likes, created_at
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        # 根据排序字段获取热门课程
+        if sort_by == "student_count":
+            order_field = "c.student_count DESC"
+        elif sort_by == "likes":
+            order_field = "c.likes DESC"
+        elif sort_by == "recent":
+            order_field = "c.created_at DESC"
+        else:
+            order_field = "c.student_count DESC"
+
+        cursor.execute(f"""
+            SELECT 
+                c.id,
+                c.title,
+                c.description,
+                c.cover_url,
+                c.price,
+                c.student_count,
+                c.likes,
+                u.username as teacher_name
+            FROM courses c
+            LEFT JOIN users u ON c.teacher_id = u.id
+            ORDER BY {order_field}
+            LIMIT %s
+        """, (limit,))
+
+        courses_data = cursor.fetchall()
+
+        courses = []
+        for row in courses_data:
+            course = {
+                "id": row[0],
+                "title": row[1],
+                "description": row[2],
+                "cover_url": row[3],
+                "price": float(row[4]),
+                "student_count": row[5],
+                "likes": row[6],
+                "teacher_name": row[7]
+            }
+            courses.append(course)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "courses": courses,
+                "sort_by": sort_by
+            }
+        }), 200
+
+    except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
     finally:
         cursor.close()
@@ -432,7 +636,7 @@ def update_progress(user_id):
                 join lessons l on lp.lesson_id = l.id
                 where lp.user_id = %s and l.course_id = %s and lp.progress=100
                 """,
-                (user_id,course_id)
+                (user_id, course_id)
             )
             completed_lessons = cursor.fetchone()[0]
             course_progress = round((completed_lessons / lesson_count) * 100)
@@ -461,6 +665,7 @@ def update_progress(user_id):
     finally:
         cursor.close()
         conn.close()
+
 
 # 添加评论
 @app.route("/api/add_comment", methods=["POST"])
@@ -518,7 +723,7 @@ def get_comments(user_id):
     course_id = data.get("course_id")
     page = int(data.get("page", 1))
     limit = 10
-    offset = (page-1) * limit
+    offset = (page - 1) * limit
 
     if course_id is None or page is None:
         return jsonify({"success": False, "message": "缺少 course_id 或 page 参数"}), 400
@@ -664,7 +869,7 @@ def get_favorites(user_id):
 
 
 # 点赞 or 取消点赞评论
-@app.route("/api/like_comment",methods=["POST"])
+@app.route("/api/like_comment", methods=["POST"])
 @login_required
 def like_comment(user_id):
     data = request.json or {}
@@ -721,7 +926,7 @@ def like_comment(user_id):
 
 
 # 点赞 or 取消点赞课程
-@app.route("/api/like_course",methods=["POST"])
+@app.route("/api/like_course", methods=["POST"])
 @login_required
 def like_course(user_id):
     data = request.json or {}
@@ -778,7 +983,7 @@ def like_course(user_id):
         conn.close()
 
 
-@app.route("/api/course_progress/get",methods=["POST"])
+@app.route("/api/course_progress/get", methods=["POST"])
 @login_required
 def get_course_progress(user_id):
     data = request.json or {}
@@ -794,7 +999,7 @@ def get_course_progress(user_id):
         # 查询课程进度
         cursor.execute(
             "select progress from course_progress where user_id = %s and course_id = %s",
-            (user_id,course_id)
+            (user_id, course_id)
         )
         row = cursor.fetchone()
         course_progress = row[0] if row else 0
@@ -809,7 +1014,7 @@ def get_course_progress(user_id):
             WHERE l.course_id = %s
             ORDER BY l.id ASC
             """,
-            (user_id,course_id)
+            (user_id, course_id)
         )
         lessons_progress = cursor.fetchall()
         result = []
@@ -820,7 +1025,7 @@ def get_course_progress(user_id):
                 "progress": row[2]
             })
 
-        return jsonify({"success": True,"course_progress": course_progress, "lessons": result}), 200
+        return jsonify({"success": True, "course_progress": course_progress, "lessons": result}), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
     finally:
@@ -925,7 +1130,7 @@ def finish_lesson(user_id):
         # 获取开始时间
         cursor.execute(
             "select id, start_at, course_id from learning_history where user_id = %s and lesson_id = %s ORDER BY id DESC LIMIT 1",
-            (user_id,lesson_id)
+            (user_id, lesson_id)
         )
         result = cursor.fetchone()
         history_id = result[0]
@@ -967,7 +1172,7 @@ def finish_lesson(user_id):
 
         conn.commit()
 
-        return jsonify({"success": True,"duration_seconds": duration_seconds}), 200
+        return jsonify({"success": True, "duration_seconds": duration_seconds}), 200
     except Exception as e:
         conn.rollback()
         return jsonify({"success": False, "message": str(e)}), 500
@@ -1139,7 +1344,8 @@ def today_total(user_id):
         conn.close()
 
 
-@app.route('/api/exam/results',methods=["POST"])
+# 获取考试成绩
+@app.route('/api/exam/results', methods=["POST"])
 @login_required
 def exam_results(user_id):
     data = request.json or {}
@@ -1197,7 +1403,7 @@ def exam_results(user_id):
         )
         from math import ceil
         total = cursor.fetchone()[0]
-        total_pages = ceil(total/limit)
+        total_pages = ceil(total / limit)
 
         if page == total_pages:
             has_next = False
@@ -1233,6 +1439,334 @@ def exam_results(user_id):
     finally:
         cursor.close()
         conn.close()
+
+
+# 获取热门课程
+@app.route("/api/course/ranking", methods=["POST"])
+def course_ranking():
+    data = request.json or {}
+    ranking_type = data.get("type", "student_count")  # 添加默认值
+    limit = int(data.get("limit", 10))
+
+    # 验证参数
+    if ranking_type not in ["student_count", "likes", "sales"]:
+        return jsonify({"success": False, "message": "排行榜类型错误"}), 400
+
+    # 限制返回数量
+    limit = min(max(limit, 1), 100)  # 限制1-100之间
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        # 根据不同类型构建SQL
+        if ranking_type == "student_count":
+            sql = """
+                SELECT 
+                    c.id,
+                    c.title,
+                    c.teacher_id,
+                    u.username as teacher_name,
+                    c.student_count,
+                    c.price,
+                    c.cover_url
+                FROM courses c
+                LEFT JOIN users u ON c.teacher_id = u.id
+                ORDER BY c.student_count DESC
+                LIMIT %s
+            """
+        elif ranking_type == "likes":
+            sql = """
+                SELECT 
+                    c.id,
+                    c.title,
+                    c.teacher_id,
+                    u.username as teacher_name,
+                    c.likes,
+                    c.price,
+                    c.cover_url
+                FROM courses c
+                LEFT JOIN users u ON c.teacher_id = u.id
+                ORDER BY c.likes DESC
+                LIMIT %s
+            """
+        elif ranking_type == "sales":
+            sql = """
+                SELECT 
+                    c.id,
+                    c.title,
+                    c.teacher_id,
+                    u.username as teacher_name,
+                    (c.student_count * c.price) as sales_amount,
+                    c.price,
+                    c.cover_url
+                FROM courses c
+                LEFT JOIN users u ON c.teacher_id = u.id
+                ORDER BY sales_amount DESC
+                LIMIT %s
+            """
+
+        cursor.execute(sql, (limit,))
+        results = cursor.fetchall()
+
+        # 构建返回数据
+        courses = []
+        for index, row in enumerate(results, start=1):
+            course_data = {
+                "rank": index,
+                "course_id": row[0],
+                "title": row[1],
+                "teacher_id": row[2],
+                "teacher_name": row[3],  # 现在有老师姓名了
+                "value": float(row[4]) if row[4] is not None else 0,
+                "price": float(row[5]) if row[5] is not None else 0,
+                "cover_url": row[6]
+            }
+
+            courses.append(course_data)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "ranking_type": ranking_type,
+                "courses": courses,
+                "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 获取用户基本信息
+@app.route("/api/user/profile",methods=["GET"])
+@login_required
+def user_profile(user_id):
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "select id,username,email,phone,role,balance,created_at from users where id = %s",
+            (user_id,)
+        )
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"success": False, "message": "用户不存在"}), 404
+
+        role_map = {0: '学生', 1: '老师'}
+        role = role_map.get(result[4], '未知')  # 使用get方法，避免KeyError
+
+        data = {
+            "user_id": result[0],
+            "username": result[1],
+            "email": result[2],
+            "phone": result[3],
+            "role": role,
+            "balance": result[5],
+            "created_at": result[6].strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        return jsonify({"success": True, "data": data}), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 更新用户信息,正常应该是发验证码，但一个练习的项目没必要折腾这些，简单验证是否知道完整的手机号和邮箱即可
+# 如果修改用户名则需要提供完整邮箱或手机号，修改邮箱要提供完整手机号，修改手机号要提供完整邮箱
+@app.route("/api/user/profile/update", methods=["POST"])
+@login_required
+def update_user_profile(user_id):
+    data = request.json or {}
+
+    update_type = data.get("update_type")  # 修改类型包括 username email phone
+    new_username = data.get("username", "")
+    old_email = data.get("old_email", "")
+    old_phone = data.get("old_phone", "")
+    new_email = data.get("new_email", "")
+    new_phone = data.get("new_phone", "")
+
+    if update_type not in ["username", "email", "phone"] or update_type is None:
+        return jsonify({"success": False, "message": "update_type 参数输入为空或输入错误"}), 400
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        # 获取用户当前信息
+        cursor.execute(
+            "SELECT username, email, phone FROM users WHERE id = %s",
+            (user_id,)
+        )
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"success": False, "message": "用户不存在"}), 404
+
+        current_username, current_email, current_phone = result
+
+        # 根据修改类型进行验证和更新
+        if update_type == "username":
+            new_username = data.get("new_username", "").strip()
+            old_email = data.get("old_email", "").strip()
+            old_phone = data.get("old_phone", "").strip()
+
+            if not new_username:
+                return jsonify({"success": False, "message": "新用户名不能为空"}), 400
+
+            # 验证旧邮箱或旧手机号
+            if old_email != current_email and old_phone != current_phone:
+                return jsonify({"success": False, "message": "邮箱或手机号验证失败"}), 400
+
+            # 检查新用户名是否已被使用（排除自己）
+            cursor.execute(
+                "SELECT id FROM users WHERE username = %s AND id != %s",
+                (new_username, user_id)
+            )
+            if cursor.fetchone():
+                return jsonify({"success": False, "message": "用户名已被使用"}), 400
+
+            # 更新用户名
+            cursor.execute(
+                "UPDATE users SET username = %s WHERE id = %s",
+                (new_username, user_id)
+            )
+            message = "用户名更新成功"
+
+        elif update_type == "email":
+            new_email = data.get("new_email", "").strip()
+            old_phone = data.get("old_phone", "").strip()
+
+            if not new_email:
+                return jsonify({"success": False, "message": "新邮箱不能为空"}), 400
+
+            # 验证旧手机号
+            if old_phone != current_phone:
+                return jsonify({"success": False, "message": "手机号验证失败"}), 400
+
+            # 检查新邮箱是否已被使用（排除自己）
+            cursor.execute(
+                "SELECT id FROM users WHERE email = %s AND id != %s",
+                (new_email, user_id)
+            )
+            if cursor.fetchone():
+                return jsonify({"success": False, "message": "邮箱已被使用"}), 400
+
+            # 更新邮箱
+            cursor.execute(
+                "UPDATE users SET email = %s WHERE id = %s",
+                (new_email, user_id)
+            )
+            message = "邮箱更新成功"
+
+        elif update_type == "phone":
+            new_phone = data.get("new_phone", "").strip()
+            old_email = data.get("old_email", "").strip()
+
+            if not new_phone:
+                return jsonify({"success": False, "message": "新手机号不能为空"}), 400
+
+            # 验证旧邮箱
+            if old_email != current_email:
+                return jsonify({"success": False, "message": "邮箱验证失败"}), 400
+
+            # 检查新手机号是否已被使用（排除自己）
+            cursor.execute(
+                "SELECT id FROM users WHERE phone = %s AND id != %s",
+                (new_phone, user_id)
+            )
+            if cursor.fetchone():
+                return jsonify({"success": False, "message": "手机号已被使用"}), 400
+
+            # 更新手机号
+            cursor.execute(
+                "UPDATE users SET phone = %s WHERE id = %s",
+                (new_phone, user_id)
+            )
+            message = "手机号更新成功"
+
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "message": message,
+            "update_type": update_type
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 修改密码
+@app.route("/api/user/change-password", methods=["POST"])
+@login_required
+def change_password(user_id):
+    data = request.json or {}
+    old_password = data.get("old_password")
+    new_password = data.get("new_password")
+
+    # 参数验证
+    if old_password is None or new_password is None:
+        return jsonify({"success": False, "message": "参数不能为空"}), 400
+
+    # 新密码长度检查
+    if len(new_password) < 6:
+        return jsonify({"success": False, "message": "新密码最小为6位"}), 400
+
+    # 新旧密码不能相同
+    if old_password == new_password:
+        return jsonify({"success": False, "message": "新旧密码不能相同"}), 400
+
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        # 查询用户当前密码
+        cursor.execute(
+            "select password from users where id = %s",
+            (user_id,)
+        )
+
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"success": False, "message": "用户不存在"}), 404
+
+        # 验证原密码
+        password = result[0]
+        if old_password != password:
+            return jsonify({"success": False, "message": "原密码输入不正确"}), 401
+
+        # 更新密码
+        cursor.execute(
+            "update users set password = %s where id = %s",
+            (new_password, user_id)
+        )
+
+        conn.commit()
+
+        return jsonify({"success": True, "message": "密码修改成功"}), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
