@@ -1588,11 +1588,6 @@ def update_user_profile(user_id):
     data = request.json or {}
 
     update_type = data.get("update_type")  # 修改类型包括 username email phone
-    new_username = data.get("username", "")
-    old_email = data.get("old_email", "")
-    old_phone = data.get("old_phone", "")
-    new_email = data.get("new_email", "")
-    new_phone = data.get("new_phone", "")
 
     if update_type not in ["username", "email", "phone"] or update_type is None:
         return jsonify({"success": False, "message": "update_type 参数输入为空或输入错误"}), 400
@@ -1765,7 +1760,620 @@ def change_password(user_id):
         conn.close()
 
 
+@app.route("/api/user/learning-overview", methods=["GET"])
+@login_required
+def learning_overview(user_id):
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
 
+    try:
+        # 获取今日时间范围
+        today_start = datetime.datetime.combine(
+            datetime.date.today(),
+            datetime.time.min
+        )
+        tomorrow_start = today_start + datetime.timedelta(days=1)
+
+        # 本周开始时间（周一）
+        today = datetime.date.today()
+        week_start = today - datetime.timedelta(days=today.weekday())  # 本周一
+        week_start_dt = datetime.datetime.combine(week_start, datetime.time.min)
+
+        # 1. 获取总学习时长（秒）
+        cursor.execute(
+            "SELECT COALESCE(SUM(duration_seconds), 0) FROM learning_history WHERE user_id = %s",
+            (user_id,)
+        )
+        total_learning_seconds = cursor.fetchone()[0] or 0
+
+        # 2. 获取总学习天数（不重复的日期数）
+        cursor.execute(
+            """
+            SELECT COUNT(DISTINCT DATE(start_at)) 
+            FROM learning_history 
+            WHERE user_id = %s AND start_at IS NOT NULL
+            """,
+            (user_id,)
+        )
+        total_learning_days = cursor.fetchone()[0] or 0
+
+        # 3. 获取连续学习天数（复用之前的逻辑）
+        # 获取所有学习过的天数
+        cursor.execute(
+            """
+            SELECT DISTINCT DATE(start_at)
+            FROM learning_history
+            WHERE user_id = %s
+            ORDER BY DATE(start_at) DESC
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        dates = [row[0] for row in rows]
+
+        # 计算连续天数
+        streak = 0
+        today_learned = False
+        if dates:
+            # 检查今天是否学习
+            today_date = datetime.date.today()
+            today_learned = any(date == today_date for date in dates)
+
+            # 计算连续天数
+            expected = today_date if today_learned else today_date - datetime.timedelta(days=1)
+            for d in dates:
+                if d == expected:
+                    streak += 1
+                    expected -= datetime.timedelta(days=1)
+                else:
+                    break
+
+        # 4. 获取已购课程总数
+        cursor.execute(
+            "SELECT COUNT(*) FROM course_student WHERE user_id = %s",
+            (user_id,)
+        )
+        total_courses = cursor.fetchone()[0] or 0
+
+        # 5. 获取已完成的课程数（progress=100）
+        cursor.execute(
+            "SELECT COUNT(*) FROM course_progress WHERE user_id = %s AND progress = 100",
+            (user_id,)
+        )
+        completed_courses = cursor.fetchone()[0] or 0
+
+        # 6. 获取进行中的课程数（0 < progress < 100）
+        cursor.execute(
+            "SELECT COUNT(*) FROM course_progress WHERE user_id = %s AND progress > 0 AND progress < 100",
+            (user_id,)
+        )
+        in_progress_courses = cursor.fetchone()[0] or 0
+
+        # 7. 计算未开始课程数
+        not_started_courses = max(0, total_courses - completed_courses - in_progress_courses)
+
+        # 8. 计算课程完成率（防止除零）
+        completion_rate = 0.0
+        if total_courses > 0:
+            completion_rate = round((completed_courses / total_courses) * 100, 2)
+
+        # 9. 计算平均每天学习时长（防止除零）
+        avg_daily_learning_seconds = 0
+        if total_learning_days > 0:
+            avg_daily_learning_seconds = round(total_learning_seconds / total_learning_days)
+
+        # 10. 计算平均每门课程学习时长（防止除零）
+        avg_learning_per_course = 0
+        if total_courses > 0:
+            avg_learning_per_course = round(total_learning_seconds / total_courses)
+
+        # 11. 获取今日学习时长
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(duration_seconds), 0) 
+            FROM learning_history 
+            WHERE user_id = %s AND start_at >= %s AND start_at < %s
+            """,
+            (user_id, today_start, tomorrow_start)
+        )
+        today_learning_seconds = cursor.fetchone()[0] or 0
+
+        # 12. 获取本周学习时长
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(duration_seconds), 0) 
+            FROM learning_history 
+            WHERE user_id = %s AND start_at >= %s
+            """,
+            (user_id, week_start_dt)
+        )
+        week_learning_seconds = cursor.fetchone()[0] or 0
+
+        # 13. 获取最后一次学习日期和课程
+        cursor.execute(
+            """
+            SELECT DATE(lh.finish_at), c.title
+            FROM learning_history lh
+            JOIN courses c ON lh.course_id = c.id
+            WHERE lh.user_id = %s AND lh.finish_at IS NOT NULL
+            ORDER BY lh.finish_at DESC
+            LIMIT 1
+            """,
+            (user_id,)
+        )
+        last_learning = cursor.fetchone()
+        last_learning_date = last_learning[0].strftime("%Y-%m-%d") if last_learning and last_learning[0] else None
+        last_learning_course = last_learning[1] if last_learning else None
+
+        # 14. 时间格式化
+        total_hours = round(total_learning_seconds / 3600, 2)
+        today_learning_minutes = today_learning_seconds // 60
+        today_learning_hours = round(today_learning_seconds / 3600, 2)
+        week_learning_hours = round(week_learning_seconds / 3600, 2)
+
+        # 格式化天时分
+        days = total_learning_seconds // (24 * 3600)
+        hours = (total_learning_seconds % (24 * 3600)) // 3600
+        minutes = (total_learning_seconds % 3600) // 60
+        days_hours_minutes = f"{days}天{hours}小时{minutes}分钟"
+
+        # 构建返回数据
+        learning_statistics = {
+            "total_learning_seconds": int(total_learning_seconds),
+            "total_learning_days": int(total_learning_days),
+            "current_streak": int(streak),
+            "total_courses": int(total_courses),
+            "completed_courses": int(completed_courses),
+            "in_progress_courses": int(in_progress_courses),
+            "not_started_courses": int(not_started_courses),
+            "completion_rate": completion_rate,
+            "avg_daily_learning_seconds": int(avg_daily_learning_seconds),
+            "avg_learning_per_course": int(avg_learning_per_course)
+        }
+
+        recent_activity = {
+            "today_learning_seconds": int(today_learning_seconds),
+            "today_learning_minutes": int(today_learning_minutes),
+            "today_learning_hours": today_learning_hours,
+            "week_learning_seconds": int(week_learning_seconds),
+            "week_learning_hours": week_learning_hours,
+            "last_learning_date": last_learning_date,
+            "last_learning_course": last_learning_course
+        }
+
+        progress_distribution = {
+            "completed": int(completed_courses),
+            "in_progress": int(in_progress_courses),
+            "not_started": int(not_started_courses)
+        }
+
+        time_breakdown = {
+            "total_hours": total_hours,
+            "days_hours_minutes": days_hours_minutes,
+            "by_course_type": {}  # 这里可以根据需要添加按课程类型的分类
+        }
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "learning_statistics": learning_statistics,
+                "recent_activity": recent_activity,
+                "progress_distribution": progress_distribution,
+                "time_breakdown": time_breakdown
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/user/dashboard", methods=["GET"])
+@login_required
+def user_dashboard(user_id):
+    """
+    用户综合数据面板接口
+    返回用户的全部关键数据
+    """
+    conn = pymysql.connect(**db_config)
+    cursor = conn.cursor()
+
+    try:
+        # 1. 用户基本信息
+        cursor.execute(
+            "SELECT id, username, email, phone, role, balance, created_at FROM users WHERE id = %s",
+            (user_id,)
+        )
+        user_result = cursor.fetchone()
+
+        if not user_result:
+            return jsonify({"success": False, "message": "用户不存在"}), 404
+
+        # 角色转换
+        role_map = {0: '学生', 1: '老师'}
+        role = role_map.get(user_result[4], '未知')
+
+        user_info = {
+            "user_id": user_result[0],
+            "username": user_result[1],
+            "email": user_result[2],
+            "phone": user_result[3],
+            "role": role,
+            "balance": float(user_result[5]) if user_result[5] is not None else 0.0,
+            "created_at": user_result[6].strftime("%Y-%m-%d %H:%M:%S") if user_result[6] else None
+        }
+
+        # 2. 学习统计摘要
+        # 总学习时长
+        cursor.execute(
+            "SELECT COALESCE(SUM(duration_seconds), 0) FROM learning_history WHERE user_id = %s",
+            (user_id,)
+        )
+        total_seconds = cursor.fetchone()[0] or 0
+        total_learning_hours = round(total_seconds / 3600, 2)
+
+        # 已购课程数
+        cursor.execute(
+            "SELECT COUNT(*) FROM course_student WHERE user_id = %s",
+            (user_id,)
+        )
+        total_courses = cursor.fetchone()[0] or 0
+
+        # 已完成课程数
+        cursor.execute(
+            "SELECT COUNT(*) FROM course_progress WHERE user_id = %s AND progress = 100",
+            (user_id,)
+        )
+        completed_courses = cursor.fetchone()[0] or 0
+
+        # 连续学习天数
+        cursor.execute(
+            """
+            SELECT DISTINCT DATE(start_at)
+            FROM learning_history
+            WHERE user_id = %s
+            ORDER BY DATE(start_at) DESC
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        dates = [row[0] for row in rows]
+
+        streak = 0
+        today_date = datetime.date.today()
+        today_learned = any(date == today_date for date in dates) if dates else False
+
+        if dates:
+            expected = today_date if today_learned else today_date - datetime.timedelta(days=1)
+            for d in dates:
+                if d == expected:
+                    streak += 1
+                    expected -= datetime.timedelta(days=1)
+                else:
+                    break
+
+        # 今日学习时长
+        today_start = datetime.datetime.combine(today_date, datetime.time.min)
+        tomorrow_start = today_start + datetime.timedelta(days=1)
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(duration_seconds), 0) 
+            FROM learning_history 
+            WHERE user_id = %s AND start_at >= %s AND start_at < %s
+            """,
+            (user_id, today_start, tomorrow_start)
+        )
+        today_seconds = cursor.fetchone()[0] or 0
+        today_learning_minutes = today_seconds // 60
+
+        # 完成率
+        completion_rate = round((completed_courses / total_courses * 100), 2) if total_courses > 0 else 0.0
+
+        learning_summary = {
+            "total_learning_hours": total_learning_hours,
+            "total_courses": total_courses,
+            "completed_courses": completed_courses,
+            "current_streak": streak,
+            "today_learning_minutes": today_learning_minutes,
+            "completion_rate": completion_rate
+        }
+
+        # 3. 最近活动
+        # 最近学习的课程（最近3门）
+        cursor.execute(
+            """
+            SELECT 
+                lh.course_id,
+                c.title,
+                cp.progress,
+                MAX(lh.start_at) as last_studied
+            FROM learning_history lh
+            JOIN courses c ON lh.course_id = c.id
+            LEFT JOIN course_progress cp ON lh.course_id = cp.course_id AND cp.user_id = %s
+            WHERE lh.user_id = %s
+            GROUP BY lh.course_id, c.title, cp.progress
+            ORDER BY last_studied DESC
+            LIMIT 3
+            """,
+            (user_id, user_id)
+        )
+        recent_courses_data = cursor.fetchall()
+
+        recent_courses = []
+        for row in recent_courses_data:
+            recent_courses.append({
+                "course_id": row[0],
+                "title": row[1],
+                "progress": row[2] or 0,
+                "last_studied": row[3].strftime("%Y-%m-%d %H:%M:%S") if row[3] else None
+            })
+
+        # 最近考试（最近3次）
+        cursor.execute(
+            """
+            SELECT 
+                er.exam_id,
+                e.title,
+                er.score,
+                (SELECT SUM(score) FROM questions WHERE exam_id = er.exam_id) as total_score,
+                er.created_at
+            FROM exam_results er
+            JOIN exams e ON er.exam_id = e.id
+            WHERE er.user_id = %s
+            ORDER BY er.created_at DESC
+            LIMIT 3
+            """,
+            (user_id,)
+        )
+        recent_exams_data = cursor.fetchall()
+
+        recent_exams = []
+        for row in recent_exams_data:
+            exam_id, title, score, total_score, created_at = row
+            total_score = total_score or 100  # 如果没有题目总分，默认100
+            percentage = round((score / total_score * 100), 2) if total_score > 0 else 0
+
+            recent_exams.append({
+                "exam_id": exam_id,
+                "title": title,
+                "score": score,
+                "total_score": total_score,
+                "percentage": percentage,
+                "date": created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else None
+            })
+
+        # 最近评论（最近3条）
+        cursor.execute(
+            """
+            SELECT 
+                c.id,
+                c.course_id,
+                cs.title,
+                c.content,
+                c.rating,
+                c.created_at
+            FROM comments c
+            JOIN courses cs ON c.course_id = cs.id
+            WHERE c.user_id = %s
+            ORDER BY c.created_at DESC
+            LIMIT 3
+            """,
+            (user_id,)
+        )
+        recent_comments_data = cursor.fetchall()
+
+        recent_comments = []
+        for row in recent_comments_data:
+            recent_comments.append({
+                "comment_id": row[0],
+                "course_id": row[1],
+                "course_title": row[2],
+                "content": row[3][:50] + "..." if len(row[3]) > 50 else row[3],  # 截断长评论
+                "rating": row[4],
+                "created_at": row[5].strftime("%Y-%m-%d %H:%M:%S") if row[5] else None
+            })
+
+        recent_activity = {
+            "recent_courses": recent_courses,
+            "recent_exams": recent_exams,
+            "recent_comments": recent_comments
+        }
+
+        # 4. 进度概览
+        # 按状态统计
+        cursor.execute(
+            """
+            SELECT 
+                COUNT(CASE WHEN progress = 100 THEN 1 END) as completed,
+                COUNT(CASE WHEN progress > 0 AND progress < 100 THEN 1 END) as in_progress,
+                COUNT(CASE WHEN progress = 0 OR progress IS NULL THEN 1 END) as not_started
+            FROM course_progress 
+            WHERE user_id = %s
+            """,
+            (user_id,)
+        )
+        status_stats = cursor.fetchone()
+
+        by_status = {
+            "completed": status_stats[0] or 0,
+            "in_progress": status_stats[1] or 0,
+            "not_started": status_stats[2] or 0
+        }
+
+        # 按百分比区间统计
+        cursor.execute(
+            """
+            SELECT 
+                COUNT(CASE WHEN progress >= 0 AND progress < 25 THEN 1 END) as range_0_25,
+                COUNT(CASE WHEN progress >= 25 AND progress < 50 THEN 1 END) as range_25_50,
+                COUNT(CASE WHEN progress >= 50 AND progress < 75 THEN 1 END) as range_50_75,
+                COUNT(CASE WHEN progress >= 75 AND progress < 100 THEN 1 END) as range_75_100,
+                COUNT(CASE WHEN progress = 100 THEN 1 END) as range_100
+            FROM course_progress 
+            WHERE user_id = %s
+            """,
+            (user_id,)
+        )
+        range_stats = cursor.fetchone()
+
+        by_percentage = [
+            {"range": "0-25%", "count": range_stats[0] or 0},
+            {"range": "25-50%", "count": range_stats[1] or 0},
+            {"range": "50-75%", "count": range_stats[2] or 0},
+            {"range": "75-100%", "count": range_stats[3] or 0},
+            {"range": "100%", "count": range_stats[4] or 0}
+        ]
+
+        progress_overview = {
+            "by_status": by_status,
+            "by_percentage": by_percentage
+        }
+
+        # 5. 互动统计
+        # 评论总数
+        cursor.execute(
+            "SELECT COUNT(*) FROM comments WHERE user_id = %s",
+            (user_id,)
+        )
+        total_comments = cursor.fetchone()[0] or 0
+
+        # 课程点赞数
+        cursor.execute(
+            "SELECT COUNT(*) FROM course_likes WHERE user_id = %s",
+            (user_id,)
+        )
+        total_course_likes = cursor.fetchone()[0] or 0
+
+        # 评论点赞数
+        cursor.execute(
+            "SELECT COUNT(*) FROM comment_likes WHERE user_id = %s",
+            (user_id,)
+        )
+        total_comment_likes = cursor.fetchone()[0] or 0
+
+        # 总点赞数
+        total_likes_given = total_course_likes + total_comment_likes
+
+        # 收藏数
+        cursor.execute(
+            "SELECT COUNT(*) FROM favorites WHERE user_id = %s",
+            (user_id,)
+        )
+        total_favorites = cursor.fetchone()[0] or 0
+
+        interaction_stats = {
+            "total_comments": total_comments,
+            "total_likes_given": total_likes_given,
+            "total_course_likes": total_course_likes,
+            "total_comment_likes": total_comment_likes,
+            "total_favorites": total_favorites
+        }
+
+        # 6. 成就系统
+        # 连续学习成就
+        streak_achievements = [
+            {"days": 7, "achieved": streak >= 7, "date": None},  # 实际项目中应该有具体达成日期
+            {"days": 30, "achieved": streak >= 30, "date": None},
+            {"days": 100, "achieved": streak >= 100, "date": None}
+        ]
+
+        # 课程完成成就
+        completion_achievements = [
+            {"courses": 5, "achieved": completed_courses >= 5, "date": None},
+            {"courses": 10, "achieved": completed_courses >= 10, "date": None},
+            {"courses": 20, "achieved": completed_courses >= 20, "date": None}
+        ]
+
+        achievements = {
+            "streak_achievements": streak_achievements,
+            "completion_achievements": completion_achievements
+        }
+
+        # 7. 快速链接
+        # 继续学习（进度最高但未完成的课程）
+        cursor.execute(
+            """
+            SELECT 
+                cp.course_id,
+                c.title,
+                cp.progress,
+                l.id as lesson_id,
+                l.title as lesson_title
+            FROM course_progress cp
+            JOIN courses c ON cp.course_id = c.id
+            LEFT JOIN lessons l ON c.id = l.course_id
+            WHERE cp.user_id = %s AND cp.progress < 100
+            ORDER BY cp.progress DESC, cp.updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,)
+        )
+        continue_learning_data = cursor.fetchone()
+
+        continue_learning = None
+        if continue_learning_data:
+            continue_learning = {
+                "course_id": continue_learning_data[0],
+                "course_title": continue_learning_data[1],
+                "progress": continue_learning_data[2],
+                "lesson_id": continue_learning_data[3],
+                "lesson_title": continue_learning_data[4]
+            }
+
+        # 推荐课程（按学生数排名，排除已购买课程）
+        cursor.execute(
+            """
+            SELECT 
+                c.id,
+                c.title,
+                c.price,
+                c.student_count,
+                u.username as teacher_name
+            FROM courses c
+            JOIN users u ON c.teacher_id = u.id
+            WHERE c.id NOT IN (SELECT course_id FROM course_student WHERE user_id = %s)
+            ORDER BY c.student_count DESC
+            LIMIT 3
+            """,
+            (user_id,)
+        )
+        recommended_courses_data = cursor.fetchall()
+
+        recommended_courses = []
+        for row in recommended_courses_data:
+            recommended_courses.append({
+                "course_id": row[0],
+                "title": row[1],
+                "price": float(row[2]) if row[2] is not None else 0.0,
+                "student_count": row[3],
+                "teacher_name": row[4]
+            })
+
+        quick_links = {
+            "continue_learning": continue_learning,
+            "recommended_courses": recommended_courses
+        }
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "user_info": user_info,
+                "learning_summary": learning_summary,
+                "recent_activity": recent_activity,
+                "progress_overview": progress_overview,
+                "interaction_stats": interaction_stats,
+                "achievements": achievements,
+                "quick_links": quick_links
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
 if __name__ == '__main__':

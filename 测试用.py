@@ -9,9 +9,9 @@ db_config = {
 conn = pymysql.connect(**db_config)
 cursor = conn.cursor()
 cursor.execute(
-    "select count(exam_id) from exam_results where user_id = %s",
+    "select sum(duration_seconds) from learning_history where user_id = %s",
     (0,)
 )
 
-course_price = cursor.fetchone()
+course_price = cursor.fetchone()[0]
 print(course_price)
