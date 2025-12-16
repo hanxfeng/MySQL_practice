@@ -3,360 +3,360 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>在线学习平台</title>
+    <title>CyberLearn 2077</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: {
+                            dark: '#09090b',
+                            card: '#18181b',
+                            neon: '#00f3ff', // 赛博青
+                            pink: '#bc13fe', // 霓虹紫
+                            glass: 'rgba(24, 24, 27, 0.7)'
+                        }
+                    },
+                    boxShadow: {
+                        'neon': '0 0 10px rgba(0, 243, 255, 0.5), 0 0 20px rgba(0, 243, 255, 0.3)',
+                        'pink': '0 0 10px rgba(188, 19, 254, 0.5), 0 0 20px rgba(188, 19, 254, 0.3)',
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        [v-cloak] { display: none; }
-        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
-        .fade-enter-from, .fade-leave-to { opacity: 0; }
-        body { background-color: #f3f4f6; }
+        body {
+            background-color: #050505;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(188, 19, 254, 0.1), transparent 25%), 
+                radial-gradient(circle at 85% 30%, rgba(0, 243, 255, 0.1), transparent 25%);
+            font-family: 'Segoe UI', sans-serif;
+            color: #e4e4e7;
+        }
+        /* 隐藏滚动条但保留功能 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #09090b; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00f3ff; }
+        
+        .glass-panel {
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        /* 霓虹文字动画 */
+        .neon-text {
+            text-shadow: 0 0 5px rgba(0, 243, 255, 0.5);
+        }
+        
+        .loader {
+            border: 3px solid #18181b;
+            border-top: 3px solid #00f3ff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-<div id="app" v-cloak class="min-h-screen flex flex-col">
+<div id="app" class="min-h-screen flex flex-col">
 
-    <nav class="bg-white shadow-sm sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center cursor-pointer" @click="goHome">
-                    <span class="text-xl font-bold text-indigo-600">LearningHub</span>
+    <nav class="sticky top-0 z-50 glass-panel bg-cyber-dark/80 border-b border-white/5">
+        <div class="container mx-auto px-6 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-2 cursor-pointer" @click="resetSearch">
+                <i class="ri-terminal-box-fill text-3xl text-cyber-neon"></i>
+                <span class="text-2xl font-black tracking-tighter text-white">
+                    CYBER<span class="text-cyber-neon neon-text">LEARN</span>
+                </span>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div v-if="user" class="flex items-center gap-3">
+                    <span class="text-sm text-gray-400">已连接: <span class="text-white">{{ user.email }}</span></span>
+                    <button @click="logout" class="px-4 py-1.5 border border-red-500/50 text-red-400 rounded hover:bg-red-500/10 transition">
+                        断开
+                    </button>
                 </div>
-                <div class="flex items-center space-x-4">
-                    <div v-if="isLoggedIn" class="flex items-center space-x-4">
-                        <span class="text-gray-600 text-sm">用户ID: {{ userId }}</span>
-                        <button @click="showFavorites" class="text-gray-600 hover:text-indigo-600">我的收藏</button>
-                        <button @click="logout" class="text-red-500 hover:text-red-700 text-sm">退出</button>
-                    </div>
-                    <div v-else>
-                        <span class="text-sm text-gray-500">请先登录</span>
-                    </div>
+                <div v-else>
+                    <button @click="showLoginModal = true" class="group relative px-6 py-2 bg-transparent overflow-hidden rounded-lg">
+                        <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-cyber-neon to-blue-600 opacity-20 group-hover:opacity-40 transition"></span>
+                        <span class="absolute inset-0 border border-cyber-neon/50 rounded-lg shadow-neon group-hover:shadow-[0_0_20px_rgba(0,243,255,0.6)] transition"></span>
+                        <span class="relative text-cyber-neon font-bold flex items-center gap-2">
+                            <i class="ri-user-shared-line"></i> 接入节点
+                        </span>
+                    </button>
                 </div>
             </div>
         </div>
     </nav>
 
-    <main class="flex-grow container mx-auto px-4 py-6">
-
-        <transition name="fade" mode="out-in">
-            <div v-if="!isLoggedIn" key="login" class="max-w-md mx-auto bg-white p-8 rounded-xl shadow-lg mt-10">
-                <h2 class="text-2xl font-bold text-center mb-6 text-gray-800">欢迎登录</h2>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">邮箱</label>
-                        <input type="email" v-model="loginForm.email" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="admin@example.com">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">密码</label>
-                        <input type="password" v-model="loginForm.password" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="******">
-                    </div>
-                    <button @click="handleLogin" :disabled="loading" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50">
-                        {{ loading ? '登录中...' : '登录' }}
+    <main class="flex-grow container mx-auto px-6 py-12">
+        
+        <div class="text-center mb-16 relative">
+            <h1 class="text-5xl md:text-7xl font-bold mb-6 text-white tracking-tight">
+                掌握 <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyber-neon to-cyber-pink">未来科技</span>
+            </h1>
+            <div class="max-w-2xl mx-auto relative group">
+                <div class="absolute -inset-1 bg-gradient-to-r from-cyber-neon to-cyber-pink rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
+                <div class="relative flex items-center bg-cyber-card border border-white/10 rounded-lg p-2">
+                    <i class="ri-search-2-line text-gray-400 ml-3 text-xl"></i>
+                    <input 
+                        v-model="keyword" 
+                        @keyup.enter="fetchCourses"
+                        type="text" 
+                        placeholder="搜索课程协议... (Enter 确认)" 
+                        class="w-full bg-transparent border-none focus:ring-0 text-white px-4 py-2 outline-none placeholder-gray-600"
+                    >
+                    <button @click="fetchCourses" class="px-6 py-2 bg-cyber-neon/10 text-cyber-neon rounded hover:bg-cyber-neon/20 transition">
+                        检索
                     </button>
                 </div>
-                <p class="mt-4 text-xs text-center text-gray-400">测试账号请确保数据库中有数据</p>
             </div>
+        </div>
 
-            <div v-else-if="currentView === 'list'" key="list">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800">{{ showFavsOnly ? '我的收藏' : '课程大厅' }}</h2>
-                    <div class="flex space-x-2" v-if="!showFavsOnly">
-                        <input v-model="searchKeyword" @keyup.enter="fetchCourses" type="text" placeholder="搜索课程..." class="border rounded-md px-3 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                        <button @click="fetchCourses" class="bg-indigo-600 text-white px-4 py-1 rounded-md hover:bg-indigo-700">搜索</button>
-                    </div>
-                </div>
+        <div v-if="loading" class="flex justify-center py-20">
+            <div class="loader"></div>
+        </div>
 
-                <div v-if="loading" class="text-center py-10 text-gray-500">加载中...</div>
-
-                <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div v-for="course in courses" :key="course.id" @click="viewDetail(course.id)" class="bg-white rounded-lg shadow hover:shadow-xl transition-shadow cursor-pointer overflow-hidden border border-gray-100">
-                        <div class="h-40 bg-gray-200 bg-cover bg-center" :style="{backgroundImage: `url(${course.cover_url || 'https://via.placeholder.com/400x200?text=Course'})`}"></div>
-                        <div class="p-4">
-                            <h3 class="text-lg font-bold text-gray-900 truncate">{{ course.title }}</h3>
-                            <div class="flex justify-between items-center mt-3">
-                                <span class="text-red-500 font-bold">¥ {{ course.price }}</span>
-                                <span class="text-xs text-gray-500">{{ course.student_count }} 人在学</span>
-                            </div>
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+            <div 
+                v-for="course in courses" 
+                :key="course.id"
+                class="group relative glass-panel bg-cyber-card rounded-xl overflow-hidden hover:-translate-y-2 transition-all duration-300"
+            >
+                <div class="h-48 overflow-hidden relative">
+                    <img 
+                        :src="course.cover_url || 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=800'" 
+                        class="w-full h-full object-cover group-hover:scale-110 transition duration-700"
+                    >
+                    <div class="absolute inset-0 bg-gradient-to-t from-cyber-dark to-transparent opacity-90"></div>
+                    <div class="absolute bottom-3 left-3 right-3 flex justify-between items-end">
+                        <span class="text-xs font-mono text-cyber-neon bg-cyber-neon/10 px-2 py-1 rounded border border-cyber-neon/20">
+                            ID: {{ String(course.id).padStart(4, '0') }}
+                        </span>
+                        <div class="flex items-center gap-1 text-cyber-pink text-xs">
+                            <i class="ri-heart-3-fill"></i> {{ course.likes }}
                         </div>
                     </div>
                 </div>
 
-                <div v-if="courses.length === 0 && !loading" class="text-center py-10 text-gray-400">
-                    暂无课程数据
-                </div>
-            </div>
-
-            <div v-else-if="currentView === 'detail' && currentCourse" key="detail" class="bg-white rounded-xl shadow-lg overflow-hidden">
-                <div class="md:flex">
-                    <div class="md:w-1/3">
-                        <img :src="currentCourse.cover_url || 'https://via.placeholder.com/400x300'" class="w-full h-full object-cover">
-                    </div>
-                    <div class="p-8 md:w-2/3 flex flex-col justify-between">
-                        <div>
-                            <div class="flex justify-between items-start">
-                                <h1 class="text-3xl font-bold text-gray-900">{{ currentCourse.title }}</h1>
-                                <button @click="toggleFavorite" class="text-2xl focus:outline-none transition transform hover:scale-110">
-                                    {{ isFavorite ? '❤️' : '🤍' }}
-                                </button>
+                <div class="p-5">
+                    <h3 class="text-xl font-bold text-white mb-2 truncate group-hover:text-cyber-neon transition">{{ course.title }}</h3>
+                    <p class="text-gray-500 text-sm line-clamp-2 h-10 mb-4">{{ course.description || '暂无描述信息...' }}</p>
+                    
+                    <div class="flex items-center justify-between border-t border-white/5 pt-4">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-black flex items-center justify-center border border-white/10">
+                                <i class="ri-user-line text-gray-400 text-xs"></i>
                             </div>
-                            <p class="mt-4 text-gray-600">{{ currentCourse.description || '暂无简介' }}</p>
-                            <div class="mt-4 flex items-center space-x-4">
-                                <span class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">讲师: {{ currentCourse.teacher.username }}</span>
-                                <span class="text-gray-500 text-sm">Email: {{ currentCourse.teacher.email }}</span>
-                            </div>
+                            <span class="text-sm text-gray-400">{{ course.teacher_name || '未知导师' }}</span>
                         </div>
-                        <div class="mt-8 flex items-center justify-between border-t pt-4">
-                            <div class="text-3xl font-bold text-red-500">¥ {{ currentCourse.price }}</div>
-                            <button @click="buyCourse" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-8 rounded-full shadow-lg transform transition hover:-translate-y-0.5">
-                                立即购买
-                            </button>
+                        <div class="text-right">
+                            <span v-if="course.price > 0" class="text-xl font-bold text-white">
+                                ¥{{ course.price }}
+                            </span>
+                            <span v-else class="text-xl font-bold text-cyber-neon">FREE</span>
                         </div>
-                    </div>
-                </div>
-
-                <div class="px-8 py-6 bg-gray-50 border-t">
-                    <div class="flex space-x-6 border-b mb-4">
-                        <button @click="activeTab = 'lessons'" :class="{'border-b-2 border-indigo-600 text-indigo-600': activeTab === 'lessons'}" class="pb-2 font-medium text-gray-600 hover:text-indigo-600">课程章节</button>
-                        <button @click="loadComments" :class="{'border-b-2 border-indigo-600 text-indigo-600': activeTab === 'comments'}" class="pb-2 font-medium text-gray-600 hover:text-indigo-600">学员评价</button>
                     </div>
 
-                    <div v-if="activeTab === 'lessons'">
-                        <ul class="space-y-3">
-                            <li v-for="lesson in currentCourse.lessons" :key="lesson.id" class="flex justify-between items-center bg-white p-3 rounded border hover:bg-gray-50">
-                                <div class="flex items-center">
-                                    <span class="w-6 h-6 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-xs mr-3">{{ lesson.id }}</span>
-                                    <span>{{ lesson.title }}</span>
-                                </div>
-                                <button @click="alert('请先购买后观看（模拟播放）')" class="text-indigo-600 text-sm hover:underline">播放</button>
-                            </li>
-                            <li v-if="currentCourse.lessons.length === 0" class="text-gray-400">暂无章节</li>
-                        </ul>
-                    </div>
-
-                    <div v-if="activeTab === 'comments'">
-                        <div class="mb-4 flex space-x-2">
-                            <input v-model="newComment" placeholder="写下你的评价..." class="flex-grow border rounded p-2 text-sm">
-                            <select v-model="newRating" class="border rounded p-2 text-sm">
-                                <option value="5">5分</option>
-                                <option value="4">4分</option>
-                                <option value="3">3分</option>
-                                <option value="2">2分</option>
-                                <option value="1">1分</option>
-                            </select>
-                            <button @click="addComment" class="bg-indigo-600 text-white px-4 rounded text-sm">发布</button>
-                        </div>
-                        <div class="space-y-4">
-                            <div v-for="(comment, idx) in comments" :key="idx" class="bg-white p-4 rounded border">
-                                <div class="flex justify-between text-sm text-gray-500 mb-1">
-                                    <span>{{ comment.username }}</span>
-                                    <span>{{ new Date(comment.created_at).toLocaleDateString() }}</span>
-                                </div>
-                                <div class="text-yellow-500 text-sm mb-1">
-                                    {{ '★'.repeat(comment.rating) }}{{ '☆'.repeat(5-comment.rating) }}
-                                </div>
-                                <p class="text-gray-800">{{ comment.content }}</p>
-                            </div>
-                            <div v-if="comments.length === 0" class="text-gray-400 text-center">暂无评论</div>
-                        </div>
-                    </div>
+                    <button 
+                        @click="buyOrDetail(course)"
+                        class="w-full mt-4 py-2 border border-white/10 rounded bg-white/5 hover:bg-cyber-neon hover:text-black hover:border-cyber-neon transition font-bold"
+                    >
+                        查看详情
+                    </button>
                 </div>
             </div>
-        </transition>
+        </div>
 
+        <div v-if="!loading && courses.length === 0" class="text-center py-20 text-gray-600">
+            <i class="ri-file-search-line text-6xl mb-4 block"></i>
+            未搜索到相关课程协议
+        </div>
     </main>
+
+    <div v-if="showLoginModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm" @click.self="showLoginModal = false">
+        <div class="bg-cyber-card border border-white/10 p-8 rounded-2xl w-full max-w-md relative shadow-2xl">
+            <button @click="showLoginModal = false" class="absolute top-4 right-4 text-gray-500 hover:text-white">
+                <i class="ri-close-line text-2xl"></i>
+            </button>
+            
+            <h2 class="text-2xl font-bold mb-6 text-white text-center">身份验证</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-gray-400 text-sm mb-1">邮箱地址</label>
+                    <input type="email" v-model="loginForm.email" class="w-full bg-black/50 border border-white/10 rounded px-4 py-3 text-white focus:border-cyber-neon outline-none transition">
+                </div>
+                <div>
+                    <label class="block text-gray-400 text-sm mb-1">访问密钥 (密码)</label>
+                    <input type="password" v-model="loginForm.password" class="w-full bg-black/50 border border-white/10 rounded px-4 py-3 text-white focus:border-cyber-neon outline-none transition">
+                </div>
+                <button @click="login" class="w-full py-3 mt-2 bg-gradient-to-r from-blue-600 to-cyber-neon text-white font-bold rounded shadow-neon hover:opacity-90 transition">
+                    确认连接
+                </button>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <script>
-const { createApp, ref, reactive, computed, onMounted } = Vue;
+    const { createApp, ref, onMounted, reactive } = Vue;
 
-const API_BASE = 'http://127.0.0.1:5000/api';
+    createApp({
+        setup() {
+            // 后端地址 (如果你的Flask不是运行在5000，请修改这里)
+            const API_BASE = 'http://127.0.0.1:5000/api';
 
-createApp({
-    setup() {
-        const token = ref(localStorage.getItem('token') || '');
-        const userId = ref(''); // JWT解码后的ID通常存在前端状态中，这里简化处理
-        const loading = ref(false);
-        const currentView = ref('list'); // 'login', 'list', 'detail'
-        const showFavsOnly = ref(false);
+            const courses = ref([]);
+            const loading = ref(false);
+            const keyword = ref("");
+            const showLoginModal = ref(false);
+            const user = ref(null);
+            
+            // 登录表单
+            const loginForm = reactive({
+                email: '',
+                password: ''
+            });
 
-        // 表单与数据
-        const loginForm = reactive({ email: '', password: '' });
-        const searchKeyword = ref('');
-        const courses = ref([]);
-        const currentCourse = ref(null);
-        const activeTab = ref('lessons');
-        const isFavorite = ref(false);
-        const comments = ref([]);
-        const newComment = ref('');
-        const newRating = ref(5);
-
-        // 计算属性
-        const isLoggedIn = computed(() => !!token.value);
-
-        // 初始化 Axios 拦截器
-        axios.interceptors.request.use(config => {
-            if (token.value) {
-                config.headers.Authorization = `Bearer ${token.value}`;
-            }
-            return config;
-        });
-
-        // JWT 解析简化版
-        const parseJwt = (token) => {
-            try {
-                return JSON.parse(atob(token.split('.')[1]));
-            } catch (e) { return null; }
-        };
-
-        if (token.value) {
-            const payload = parseJwt(token.value);
-            if(payload) userId.value = payload.user_id;
-            fetchCourses();
-        }
-
-        // --- 方法 ---
-
-        async function handleLogin() {
-            loading.value = true;
-            try {
-                const res = await axios.post(`${API_BASE}/login`, loginForm);
-                if (res.data.success) {
-                    token.value = res.data.token;
-                    localStorage.setItem('token', token.value);
-                    const payload = parseJwt(token.value);
-                    userId.value = payload.user_id;
-                    // 重置状态
-                    showFavsOnly.value = false;
-                    fetchCourses();
+            // 初始化 Axios 拦截器 (自动带 Token)
+            const setupAxios = () => {
+                const token = localStorage.getItem('token');
+                if (token) {
+                    // 简单的 JWT 解析以获取用户信息 (仅用于显示)
+                    try {
+                        const base64Url = token.split('.')[1];
+                        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                        }).join(''));
+                        // 注意：这里只是为了前端显示，并没有校验签名
+                        // 你的后端返回 token 里可能包含 user_id，但不一定包含 email，
+                        // 这里我们暂时显示 localStorage 存的 email 或者 "User"
+                        user.value = { email: localStorage.getItem('user_email') || 'User' };
+                    } catch (e) {
+                        localStorage.removeItem('token');
+                    }
                 }
-            } catch (error) {
-                alert(error.response?.data?.message || '登录失败');
-            } finally {
-                loading.value = false;
-            }
+            };
+
+            // 获取课程列表
+            const fetchCourses = async () => {
+                loading.value = true;
+                try {
+                    const res = await axios.post(`${API_BASE}/course_list`, {
+                        page: 1,
+                        limit: 12,
+                        keyword: keyword.value,
+                        sort_by: "created_at"
+                    });
+                    if (res.data.success) {
+                        courses.value = res.data.data.courses;
+                    }
+                } catch (error) {
+                    console.error("加载失败", error);
+                    alert("连接服务器失败，请确保 Flask 后端已启动且端口正确。");
+                } finally {
+                    loading.value = false;
+                }
+            };
+
+            // 登录逻辑
+            const login = async () => {
+                if (!loginForm.email || !loginForm.password) return alert("请输入完整信息");
+                
+                try {
+                    const res = await axios.post(`${API_BASE}/login`, {
+                        email: loginForm.email,
+                        password: loginForm.password
+                    });
+                    
+                    if (res.data.success) {
+                        const token = res.data.token;
+                        localStorage.setItem('token', token);
+                        localStorage.setItem('user_email', loginForm.email); // 临时存一下邮箱用于显示
+                        
+                        // 配置 Axios 头
+                        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                        
+                        setupAxios();
+                        showLoginModal.value = false;
+                        alert("连接成功！");
+                    }
+                } catch (error) {
+                    const msg = error.response?.data?.message || "登录失败";
+                    alert(msg);
+                }
+            };
+
+            // 登出
+            const logout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user_email');
+                user.value = null;
+                delete axios.defaults.headers.common['Authorization'];
+            };
+
+            // 重置搜索
+            const resetSearch = () => {
+                keyword.value = "";
+                fetchCourses();
+            };
+
+            // 点击课程（逻辑演示）
+            const buyOrDetail = (course) => {
+                if (!user.value) {
+                    alert("请先登录接入节点！");
+                    showLoginModal.value = true;
+                    return;
+                }
+                // 这里演示调用购买接口，或者你可以扩展做跳转
+                const confirmBuy = confirm(`确认花费 ¥${course.price} 购买《${course.title}》吗？`);
+                if (confirmBuy) {
+                    axios.post(`${API_BASE}/buy_course`, { course_id: course.id }, {
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    })
+                    .then(res => {
+                        alert(res.data.message);
+                    })
+                    .catch(err => {
+                        alert(err.response?.data?.message || "购买失败");
+                    });
+                }
+            };
+
+            onMounted(() => {
+                setupAxios();
+                fetchCourses();
+            });
+
+            return {
+                courses,
+                loading,
+                keyword,
+                showLoginModal,
+                user,
+                loginForm,
+                fetchCourses,
+                login,
+                logout,
+                resetSearch,
+                buyOrDetail
+            };
         }
-
-        function logout() {
-            token.value = '';
-            localStorage.removeItem('token');
-            courses.value = [];
-            currentView.value = 'list';
-        }
-
-        function goHome() {
-            if (!isLoggedIn.value) return;
-            currentView.value = 'list';
-            showFavsOnly.value = false;
-            currentCourse.value = null;
-            fetchCourses();
-        }
-
-        async function fetchCourses() {
-            if (!isLoggedIn.value) return;
-            loading.value = true;
-            try {
-                const url = showFavsOnly.value ? `${API_BASE}/get_favorites` : `${API_BASE}/course_list`;
-                const payload = showFavsOnly.value ? { page: 1 } : { page: 1, keyword: searchKeyword.value };
-
-                const res = await axios.post(url, payload);
-                courses.value = res.data.data;
-                currentView.value = 'list';
-            } catch (error) {
-                console.error(error);
-                alert('获取课程列表失败');
-            } finally {
-                loading.value = false;
-            }
-        }
-
-        function showFavorites() {
-            showFavsOnly.value = true;
-            fetchCourses();
-        }
-
-        async function viewDetail(courseId) {
-            loading.value = true;
-            try {
-                // 1. 获取详情
-                const res = await axios.post(`${API_BASE}/course_detail`, { course_id: courseId });
-                currentCourse.value = res.data.data;
-
-                // 2. 检查收藏状态 (这里偷懒用favorites列表检查，因为API没提供is_fav字段)
-                // 实际项目中建议后端detail接口返回 is_favorite
-                checkIfFavorite(courseId);
-
-                currentView.value = 'detail';
-                activeTab.value = 'lessons';
-            } catch (error) {
-                alert(error.response?.data?.message || '获取详情失败');
-            } finally {
-                loading.value = false;
-            }
-        }
-
-        // 辅助检查是否收藏 (Mock行为，因为后端未直接提供单条查询)
-        async function checkIfFavorite(courseId) {
-             // 简单起见，这里默认为false，点击收藏按钮时会调用API切换
-             isFavorite.value = false;
-        }
-
-        async function buyCourse() {
-            if (!confirm(`确认花费 ¥${currentCourse.value.price} 购买吗？`)) return;
-            try {
-                const res = await axios.post(`${API_BASE}/buy_course`, { course_id: currentCourse.value.id });
-                alert(res.data.message);
-            } catch (error) {
-                alert(error.response?.data?.message || '购买失败');
-            }
-        }
-
-        async function toggleFavorite() {
-            try {
-                const res = await axios.post(`${API_BASE}/favorite_course`, { course_id: currentCourse.value.id });
-                alert(res.data.message);
-                isFavorite.value = !isFavorite.value;
-            } catch (error) {
-                alert('操作失败');
-            }
-        }
-
-        async function loadComments() {
-            activeTab.value = 'comments';
-            try {
-                const res = await axios.post(`${API_BASE}/get_comments`, { course_id: currentCourse.value.id, page: 1 });
-                comments.value = res.data.data;
-            } catch (error) {
-                console.error(error);
-            }
-        }
-
-        async function addComment() {
-            if(!newComment.value) return alert('请输入评论内容');
-            try {
-                await axios.post(`${API_BASE}/add_comment`, {
-                    course_id: currentCourse.value.id,
-                    rating: parseInt(newRating.value),
-                    content: newComment.value
-                });
-                alert('评论成功');
-                newComment.value = '';
-                loadComments(); // 刷新
-            } catch (error) {
-                alert(error.response?.data?.message || '评论失败，请确认是否已购买');
-            }
-        }
-
-        return {
-            token, userId, isLoggedIn, loading, currentView,
-            loginForm, searchKeyword, courses, currentCourse,
-            activeTab, isFavorite, showFavsOnly, comments, newComment, newRating,
-            handleLogin, logout, goHome, fetchCourses, showFavorites,
-            viewDetail, buyCourse, toggleFavorite, loadComments, addComment
-        };
-    }
-}).mount('#app');
+    }).mount('#app');
 </script>
+
 </body>
 </html>
