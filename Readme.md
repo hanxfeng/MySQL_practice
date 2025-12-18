@@ -456,4 +456,261 @@
 
 \## 后端接口介绍：  
 
+### 接口1：/api/login
+#### 类型：
+POST
+#### 输入：
+email（邮箱）、password（密码）
+#### 作用：
+用户登录验证，验证成功后生成并返回JWT令牌，用于后续接口的身份认证。
+
+---
+
+### 接口2：/api/course_list
+#### 类型：
+POST
+#### 输入：
+page（页码，默认1）、limit（每页条数，默认10）、keyword（搜索关键词）、teacher_id（老师ID）、min_price（最低价格）、max_price（最高价格）、free_only（是否仅免费课程）、sort_by（排序字段，默认created_at）、sort_order（排序方式，默认desc）
+#### 作用：
+根据多条件筛选、分页和排序查询课程列表，并返回课程总数、分页信息及价格/学生数范围等筛选辅助数据。
+
+---
+
+### 接口3：/api/course/popular
+#### 类型：
+POST
+#### 输入：
+limit（返回条数，默认10，最大50）、sort_by（排序字段，默认student_count，可选likes、recent）
+#### 作用：
+根据学生数、点赞数或创建时间排序，查询热门课程列表。
+
+---
+
+### 接口4：/api/course_detail
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）
+#### 作用：
+查询指定课程的详细信息，包括课程基础信息、授课老师信息及课程章节列表。
+
+---
+
+### 接口5：/api/buy_course
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+学生购买课程，验证用户是否已购买、余额是否充足，完成订单创建、余额扣除、课程权限添加、学习进度初始化及课程学生数更新。
+
+---
+
+### 接口6：/api/progress/get
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+查询指定课程的整体学习进度（百分比）及每个章节的学习进度详情。
+
+---
+
+### 接口7：/api/progress/update
+#### 类型：
+POST
+#### 输入：
+lesson_id（章节ID，必填）、progress（进度值，0~100，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+更新指定章节的学习进度，并同步计算和更新对应课程的整体学习进度。
+
+---
+
+### 接口8：/api/add_comment
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、rating（评分，1~5，必填）、content（评论内容，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+学生为已购买的课程添加评论和评分，验证课程是否存在、用户是否已购买课程。
+
+---
+
+### 接口9：/api/get_comments
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、page（页码，默认1）、请求头携带Authorization（Bearer Token）
+#### 作用：
+分页查询指定课程的评论列表，包含评论内容、评分、点赞数、发布时间及评论用户名称。
+
+---
+
+### 接口10：/api/favorite_course
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+用户收藏/取消收藏课程，若已收藏则删除收藏记录，未收藏则添加收藏记录。
+
+---
+
+### 接口11：/api/get_favorites
+#### 类型：
+POST
+#### 输入：
+page（页码，默认1）、请求头携带Authorization（Bearer Token）
+#### 作用：
+分页查询用户收藏的课程列表，返回课程基础信息。
+
+---
+
+### 接口12：/api/like_comment
+#### 类型：
+POST
+#### 输入：
+comment_id（评论ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+用户点赞/取消点赞评论，若未点赞则添加点赞记录并增加评论点赞数，已点赞则删除记录并减少评论点赞数（最低为0）。
+
+---
+
+### 接口13：/api/like_course
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+用户点赞/取消点赞课程，若未点赞则添加点赞记录并增加课程点赞数，已点赞则删除记录并减少课程点赞数（最低为0）。
+
+---
+
+### 接口14：/api/course_progress/get
+#### 类型：
+POST
+#### 输入：
+course_id（课程ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+查询指定课程的整体进度及所有章节的进度详情（左连接查询，无进度则显示0）。
+
+---
+
+### 接口15：/api/lesson/get
+#### 类型：
+POST
+#### 输入：
+lesson_id（章节ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+查询指定章节的详细信息，并自动创建学习历史记录（若当前无未完成的记录）。
+
+---
+
+### 接口16：/api/lesson/finish
+#### 类型：
+POST
+#### 输入：
+lesson_id（章节ID，必填）、请求头携带Authorization（Bearer Token）
+#### 作用：
+记录章节学习完成时间和学习时长，并更新对应课程的整体进度（按章节进度平均值）。
+
+---
+
+### 接口17：/api/user/streak
+#### 类型：
+GET
+#### 输入：
+请求头携带Authorization（Bearer Token）
+#### 作用：
+计算并返回用户的连续学习天数、今日是否学习及最后学习日期。
+
+---
+
+### 接口18：/api/learning/history
+#### 类型：
+GET
+#### 输入：
+请求头携带Authorization（Bearer Token）
+#### 作用：
+查询用户最近30条学习历史记录，包含课程、章节、学习时间及时长等信息。
+
+---
+
+### 接口19：/api/learning/today_total
+#### 类型：
+GET
+#### 输入：
+请求头携带Authorization（Bearer Token）
+#### 作用：
+统计用户今日的学习总时长（秒）。
+
+---
+
+### 接口20：/api/exam/results
+#### 类型：
+POST
+#### 输入：
+page（页码，默认1）、limit（每页条数，默认10）、请求头携带Authorization（Bearer Token）
+#### 作用：
+分页查询用户的考试成绩列表，返回成绩统计信息（平均分、最高分、最低分）及分页信息。
+
+---
+
+### 接口21：/api/course/ranking
+#### 类型：
+POST
+#### 输入：
+type（排行榜类型，默认student_count，可选likes、sales）、limit（返回条数，默认10，1~100）
+#### 作用：
+根据学生数、点赞数或销售额（学生数×价格）排序，返回课程排行榜。
+
+---
+
+### 接口22：/api/user/profile
+#### 类型：
+GET
+#### 输入：
+请求头携带Authorization（Bearer Token）
+#### 作用：
+查询用户的基本信息，包括用户名、邮箱、手机号、角色、余额及注册时间。
+
+---
+
+### 接口23：/api/user/profile/update
+#### 类型：
+POST
+#### 输入：
+update_type（修改类型，必填，可选username、email、phone）、对应修改类型的新值（如new_username）、验证信息（如旧邮箱/旧手机号）、请求头携带Authorization（Bearer Token）
+#### 作用：
+更新用户的用户名、邮箱或手机号，验证旧信息并检查新值是否已被占用。
+
+---
+
+### 接口24：/api/user/change-password
+#### 类型：
+POST
+#### 输入：
+old_password（旧密码，必填）、new_password（新密码，必填，长度≥6）、请求头携带Authorization（Bearer Token）
+#### 作用：
+修改用户密码，验证旧密码，检查新密码长度及是否与旧密码相同。
+
+---
+
+### 接口25：/api/user/learning-overview
+#### 类型：
+GET
+#### 输入：
+请求头携带Authorization（Bearer Token）
+#### 作用：
+返回用户的学习统计数据（总时长、学习天数、课程完成率等）、近期学习活动（今日/本周时长、最后学习信息）、课程进度分布及时间拆解数据。
+
+---
+
+### 接口26：/api/user/dashboard
+#### 类型：
+GET
+#### 输入：
+请求头携带Authorization（Bearer Token）
+#### 作用：
+返回用户的综合数据面板，包含基本信息、学习摘要、最近活动、进度概览、互动统计、成就及快速链接（继续学习、推荐课程）。
 
